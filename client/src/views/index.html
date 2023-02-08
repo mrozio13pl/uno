@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="uno">
+    <title>UNO - Multiplayer Game</title>
+    <script src="https://code.jquery.com/jquery-3.6.3.slim.js"
+        integrity="sha256-DKU1CmJ8kBuEwumaLuh9Tl/6ZB6jzGOBV/5YpNE2BWc=" crossorigin="anonymous"></script>
+    <script src="script.js" defer></script>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.1/css/all.min.css"
+        integrity="sha512-MV7K8+y+gLIBoVD59lQIYicR65iaqukzvf/nwasF0nqhPay5w/9lJmVM2hMDcnK1OnMGCdVK+iQrJ7lzPJQd1w=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+</head>
+<body>
+    <noscript>You need to enable Javascript in your browser to run this app.</noscript>
+    <div id="menu-screen">
+        <div class="loading-container">
+            <p>Loading...</p>
+        </div>
+        <div class="menu-container">
+            <h1 class="title">UNO</h1>
+            <button id="play">Play</button>
+            <div class="menu-footer">
+                <p>This game is <a target="_blank" href="https://github.com/mrozio13pl/uno">open source</a></p>
+            </div>
+        </div>
+    </div>
+    <div id="games-container">
+        <div class="head">
+            <div>
+                <button class="create-room">Create Room</button>
+            </div>
+            <div style="border-left: 1px solid #5c5c5c;"></div>
+            <div>
+                <input type="text" class="room-code" placeholder="Room Code">
+                <button class="join-room">Join</button>
+            </div>
+        </div>
+        <div class="room-list">
+            Fetching data...
+        </div>
+        <div class="footer">
+            <button class="refresh">Refresh <i class="fa-solid fa-rotate"></i></button>
+        </div>
+    </div>
+    <div id="nickname">
+        <div>
+            <input type="text" class="nickname" placeholder="Nickname" maxlength="16">
+        </div>
+        <div class="room-settings">
+            <label title="Make your room accessible only by a code" class="option">Private<input type="checkbox" data-private>
+                <span class="mark"></span>
+            </label>
+        </div>
+        <div>
+            <button class="continue">Continue</button>
+        </div>
+    </div>
+    <div class="cancel">&times;</div>
+    <div id="limbo">
+        <div class="code">
+            <p>
+                Code: <a id="room-code">-</a>
+            </p>
+        </div>
+        <hr>
+        <div class="limbo-player-list"></div>
+        <div class="limbo-admin">
+            <button class="limbo-start">Start</button>
+        </div>
+    </div>
+    <div id="overlay">
+        <div class="player you">
+            <div class="player-nickname"></div>
+            <div class="my-cards"></div>
+        </div>
+        <div class="center">
+            <div class="deck">
+                <div class="my-card black"><span class="inner"><span class="mark default">
+                            <div class="uno-default">UNO</div>
+                        </span></span></div>
+            </div>
+            <div class="center-card"></div>
+        </div>
+        <div class="color-selector-container">
+            <div class="select-color">
+                <div class="color-selector">
+                    <div class="segment yellow"></div>
+                    <div class="segment green"></div>
+                    <div class="segment blue"></div>
+                    <div class="segment red"></div>
+                </div>
+            </div>
+        </div>
+        <div id="scores">
+            <h1 class="scores-title">Leaderboard</h1>
+            <div class="scores-list"></div>
+            <div class="scores-admin">
+                <div class="admin-buttons">
+                    <button class="scores-start">Start</button>
+                </div>
+            </div>
+        </div>
+        <div id="chat-room">
+            <div class="chat-head">
+                <h1>Chat</h1>
+                <h1 class="chat-switch"><i class="fa-solid fa-chevron-down"></i></h1>
+            </div>
+            <div class="chat">
+                <div class="chat-messages"></div>
+                <div class="chat-input">
+                    <div>
+                        <input type="text" placeholder="Press Enter to type..." maxlength="64">
+                    </div>
+                    <div class="chat-send">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="uno">UNO</div>
+        <div class="uno-message"></div>
+        <div class="timeout" title="Time you have to place or take some card"></div>
+        <div class="center-plus"></div>
+        <div class="round-container">
+            <div class="round round-1"></div>
+            <div class="round round-2"></div>
+        </div>
+    </div>
+    <div id="player-management-container">
+        <div class="kick-head">
+            <div class="kick-desc">Do you want to kick <a></a>?</div>
+            <button class="kick-accept">Yes</button>
+            <button class="kick-decline">Cancel!</button>
+        </div>
+    </div>
+    <div id="error-container">
+        <div class="error-head">
+            <div class="error-title"><i class="fa-solid fa-circle-xmark" style="color:#ff0000;"></i> <a>Error</a></div>
+            <hr style="width:60%;margin:.5em auto;">
+            <div class="error-desc"></div>
+            <button class="error-close">Ok!</button>
+        </div>
+    </div>
+</body>
+</html>
