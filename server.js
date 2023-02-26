@@ -1,23 +1,29 @@
 const WebSocket = require('ws');
+const Logger = require('./modules/logger/logger');
+const PlayerCommands = require('./modules/commands/player');
+const config = require('./config');
+const badwords = require('./modules/badWords');
+
+let log = new Logger();
 
 class Server {
-    constructor(port) {
-        this.server = new WebSocket.Server({ port: port || 9090 });
+    constructor() {
+        this.version = config.version;
+        this.config = config;
+
+        log.info("Version:\x1b[32m", this.version, '\x1b[0m');
+
+        if(!this.config.port || isNaN(this.config.port)) { // port validation
+            log.warn("Port is missing in the settings or is invalid!");
+            this.config.port = 9090; 
+        };
+        this.server = new WebSocket.Server({ port: this.config.port });
         this.rooms = new Map();
         this.players = new Array();
-        this.port = port;
-        this.config = {
-            win_points: 500, // points to win
-            room_timeout: 300, // time after room gets removed due to inactivity (seconds)
-            player_timeout: 60, // time after player is kicked due to inactivity (seconds)
-            uno_cooldown: 1000, // cooldown for players pressing uno button (milliseconds)
-            chat_cooldown: 250, // cooldown for chat (milliseconds)
-            refresh_cooldown: 1500, // cooldown for players refreshing room list (milliseconds)
-        }
+        this.playerCommands = new PlayerCommands(this);
+        this.playerLevel = 0;
 
-        String.prototype.date = function date() {
-            return '\x1b[36m[' + new Date().toLocaleString().replace(',', '') + ']\x1b[0m ' + this;
-        };
+        badwords.load();
     };
     create(socket, data) {
         if (!data.nickname || (this.players.filter(e => e.id === socket.id)[0] && this.rooms.get(this.players.filter(e => e.id === socket.id)[0].roomID)) || this.players.filter(player => player.id === socket.id).length > 1) return; // owner nick and id
@@ -38,13 +44,13 @@ class Server {
                 player.socket.send(JSON.stringify({ type: "room_closed", title: "Room Closed", message: "Room closed due to inactivity!" }));
                 this.players.splice(this.players.findIndex(player_ => player_.id === player.id), 1);
             });
-            console.log(`Room \x1b[35m${room.roomID}\x1b[0m closed due to inactivity`.date());
+            log.log(`Room \x1b[35m${room.roomID}\x1b[0m closed due to inactivity`);
             this.rooms.delete(room.roomID);
         }
         room.timeout = setTimeout(room.self_destruction, 1e3 * this.config.room_timeout);
         socket.send(JSON.stringify({ type: "created_room", id: room.roomID }));
         this.rooms.set(room.roomID, room);
-        console.log(`Room \x1b[35m${room.roomID}\x1b[0m created by \x1b[32m${data.nickname}\x1b[0m`.date());
+        log.log(`Room \x1b[35m${room.roomID}\x1b[0m created by \x1b[32m${data.nickname}\x1b[0m`);
         room.nickname = data.nickname;
         this.join(socket, room);
     };
@@ -54,8 +60,11 @@ class Server {
         if (!data.nickname.replace(/\s+/g, '').length) return socket.send(JSON.stringify({ type: "error", title: "Couldn't Join", message: "You don't have a valid nickname!" }));
         if (room.players.length >= 4) return socket.send(JSON.stringify({ type: "error", title: "Couldn't Join", message: "Room is full!" }));
         if (room.players.filter(player => player.id === socket.id).length || this.players.filter(player => player.id === socket.id).length > 1) return socket.send(JSON.stringify({ type: "error", title: "Couldn't Join", message: "You are already connected to this room!" }));
+        this.playerLevel++;
         const player = {
             id: socket.id,
+            publicID: this.playerLevel,
+            permissionLevel: socket.id === room.ownerID ? 1 : 0,
             roomID: room.roomID,
             nickname: data.nickname.substring(0, 16),
             cards: [],
@@ -63,21 +72,26 @@ class Server {
             chatColor: room.chatColors.filter(color => !room.players.filter(player => player.chatColor === color).length)[~~(Math.random() * room.chatColors.filter(color => !room.players.filter(player => player.chatColor === color).length).length)] || "#fff",
             socket: socket
         };
-        console.log(`Player joined \x1b[32m${player.nickname}\x1b[0m to \x1b[35m${room.roomID}\x1b[0m`.date());
         room.players.push(player);
         this.players.push(player);
+        if(this.config.nick_badword_filter && badwords.check(player.nickname)) {
+            log.log(`Player \x1b[32m${player.nickname}\x1b[0m was kicked from \x1b[35m${room.roomID}\x1b[0m due to having improper nickname`);
+            socket.send(JSON.stringify({type: "error", title: "Couldn't Join", message: "Improper nickname!" }));
+            this.leave(socket);
+            return;
+        }
         socket.send(JSON.stringify({ type: "joined_room", id: room.roomID }));
         this.updateRoom(room.roomID);
+        log.log(`Player joined \x1b[32m${player.nickname}\x1b[0m to \x1b[35m${room.roomID}\x1b[0m`);
     };
     leave(socket){
         if (!this.players.filter(player => player.id === socket.id).length || !this.rooms.get(this.players.filter(player => player.id === socket.id)[0].roomID)) return;
-        const player = this.players.filter(player => player.id === socket.id)[0];
-        if (!player) return;
-        const room = this.rooms.get(player.roomID);
-        if (!room) return;
+        const player = this.data(socket).player;
+        const room = this.data(socket).room;
+        if (!player || !room) return;
         const playerIndex = room.players.findIndex(player => player.id === socket.id);
         if (!room.players[playerIndex]) return;
-        console.log(`Player left \x1b[32m${player.nickname}\x1b[0m from \x1b[35m${room.roomID}\x1b[0m`.date());
+        log.log(`Player left \x1b[32m${player.nickname}\x1b[0m from \x1b[35m${room.roomID}\x1b[0m`);
         if (room.isRunning) this.sendMessage(room, null, player.nickname + " left the game!");
         this.players.splice(this.players.findIndex(player => player.id === socket.id), 1);
         room.players.splice(playerIndex, 1);
@@ -85,31 +99,39 @@ class Server {
         this.updateRoom(room.roomID);
         socket.send(JSON.stringify({type:"kicked"}));
         if (room.ownerID === socket.id) {
-            console.log(`Room \x1b[35m${room.roomID}\x1b[0m closed by owner`.date());
+            log.log(`Room \x1b[35m${room.roomID}\x1b[0m closed by owner`);
             this.close(room, "Owner closed the room!");
         }
         else if (room && ((room.isRunning && room.players.length <= 1) || room.players.length === 0)) {
-            console.log(`Room \x1b[35m${room.roomID}\x1b[0m closed automatically`.date());
+            log.log(`Room \x1b[35m${room.roomID}\x1b[0m closed automatically`);
             this.close(room, "Everyone left the room!");
         }
     };
+    data(socket){
+        const player = this.players.filter(player => player.id === socket.id)[0];
+        if (!player) return null;
+        const room = this.rooms.get(player.roomID);
+        return {
+            player: player,
+            room: room
+        };
+    }
     kick(socket, data){
         if(!data.id) return;
-        const player = this.players.filter(player => player.id === socket.id)[0];
-        if (!player) return;
-        const room = this.rooms.get(player.roomID);
-        if (!room || room.ownerID !== socket.id) return;
+        const player = this.data(socket).player;
+        const room = this.data(socket).room;
+        if (!player || !room || room.ownerID !== socket.id) return;
         const kickedPlayer = room.players.filter(player => player.id === data.id);
         if (!kickedPlayer.length || !kickedPlayer[0].socket) return socket.send(JSON.stringify({ type: "error", title: "Couldn't kick a player", message: "Player not found!" }));
         if (kickedPlayer[0].id === socket.id) return socket.send(JSON.stringify({ type: "error", title: "Couldn't kick a player", message: "You can't kick yourself!" }));
-        console.log(`Player \x1b[32m${player.nickname}\x1b[0m has been kicked from \x1b[35m${room.roomID}\x1b[0m by owner`.date())
+        log.log(`Player \x1b[32m${player.nickname}\x1b[0m has been kicked from \x1b[35m${room.roomID}\x1b[0m by owner`)
         kickedPlayer[0].socket.send(JSON.stringify({ type: "error", title: "Kicked", message: "You have been kicked by owner!"}))
         this.leave(kickedPlayer[0].socket);
     }
     start(socket) {
-        const player = this.players.filter(player => player.id === socket.id)[0];
+        const player = this.data(socket).player;
+        const room = this.data(socket).room;
         if (!player) return;
-        const room = this.rooms.get(player.roomID);
         if (!room) return socket.send(JSON.stringify({ type: "error", title: "Couldn't start the game", message: "Room not found!" }));
         if (room.players.length < 2) return socket.send(JSON.stringify({ type: "error", title: "Couldn't start the game", message: "Not enough players! (Minimum 2)" }));
         if (room.isRunning) return socket.send(JSON.stringify({ type: "error", title: "Couldn't start the game", message: "Game has already started!" }));
@@ -147,19 +169,13 @@ class Server {
 
         this.sendMessage(room, null, "Game has started!");
 
-        console.log(`Room \x1b[35m${room.roomID}\x1b[0m started`.date());
+        log.log(`Room \x1b[35m${room.roomID}\x1b[0m started`);
     };
     action(socket, data) {
-        let player = this.players.filter(player => player.id === socket.id)[0];
-        if (!player) return;
-        const room = this.rooms.get(player.roomID);
-        if(!room) return;
-        player = room.players.filter(player => player.id === socket.id)[0];
-        if (!player) return;
-        if (!player.turn) return; // socket.send(JSON.stringify({ type: "error", message: "It's not your turn!" }));
-
+        const player = this.data(socket).player;
+        const room = this.data(socket).room;
+        if(!player || !player.turn || !room) return;
         if (data.card && data.card.number) data.card.number = isNaN(parseInt(data.card.number)) ? null : parseInt(data.card.number);
-
         switch (data.action) {
             case 'place': {
                 if (!data.card || !player.cards.filter(card => card.color === data.card.color && card.ability === data.card.ability && card.number === data.card.number).length) return; // check if player has card
@@ -217,21 +233,40 @@ class Server {
             }
         }
     };
-    giveCards(room, socket, amount = 1) {
+    giveCards(room, socket, amount = 1, type = null) {
         if(!amount) amount = 1;
         for (let i = 0; i < amount; i++) {
             if (!room.cards.length) {
                 if (!room.centerCards.length) {
-                    this.end(room.roomID);
                     this.sendMessage(room, null, "No cards left in draw pile and discard pile! Restarting the game.");
+                    this.end(room.roomID);
                     return;
                 }
                 room.cards = this.shuffle(room.centerCards); // reset cards
                 room.centerCards = [];
             };
             const index = room.players.findIndex(player => player.id === socket.id);
-            room.players[index].cards.push(room.cards[0]);
-            room.cards.splice(0, 1);
+            switch(true){
+                case type === "ability": {
+                    var cardIndex = room.cards.findIndex(card => card.ability);
+                    if(!cardIndex) return;
+                    room.players[index].cards.push(room.cards[cardIndex]);
+                    room.cards.splice(cardIndex, 1);
+                    break;
+                }
+                case type != null: {
+                    var cardIndex = room.cards.findIndex(card => card.ability === type);
+                    if(!cardIndex || !room.cards[cardIndex]) return;
+                    room.players[index].cards.push(room.cards[cardIndex]);
+                    room.cards.splice(cardIndex, 1);
+                    break;
+                }
+                default: {
+                    room.players[index].cards.push(room.cards[0]);
+                    room.cards.splice(0, 1);
+                    break;
+                }
+            }
         }
     };
     nextTurn(room, player, data, socket, turn = true) {
@@ -304,7 +339,7 @@ class Server {
         room.centerPlus = 0;
         this.updateCards(room);
         this.updateRoom(room.roomID);
-        this.turn(room.players.filter(player => player.turn));
+        this.turn(room.players.filter(player => player.turn)[0]);
     };
     end(code){
         const room = this.rooms.get(code);
@@ -324,6 +359,7 @@ class Server {
         this.updateRoom(room.roomID);
         this.updateCards(room);
 
+        if(this.config.announce_round_winner && winner) this.sendMessage(room, null, `${winner.nickname} won this round! (+${winPoints} points)`);
         const scoresList = [];
         room.players.forEach(player => {
             scoresList.push({nickname:player.nickname,points:player.points,cards:player.cards,isWinner:player.id===winner.id,id:player.id});
@@ -404,10 +440,9 @@ class Server {
         return this.shuffle(cards);
     };
     uno(socket){
-        const player = this.players.filter(player => player.id === socket.id)[0];
-        if (!player) return;
-        const room = this.rooms.get(player.roomID);
-        if (!room || !room.isRunning || (socket.lastUno && socket.lastUno > Date.now() - this.config.uno_cooldown && !(room.players.filter(player => player.turn).length && room.players.filter(player => player.turn)[0].id === socket.id && room.players.filter(player => player.turn)[0].cards.length <= 2 && !room.players.filter(player => player.turn)[0].uno))) return;
+        const player = this.data(socket).player;
+        const room = this.data(socket).room;
+        if (!player || !room || !room.isRunning || (socket.lastUno && socket.lastUno > Date.now() - this.config.uno_cooldown && !(room.players.filter(player => player.turn).length && room.players.filter(player => player.turn)[0].id === socket.id && room.players.filter(player => player.turn)[0].cards.length <= 2 && !room.players.filter(player => player.turn)[0].uno))) return;
         socket.lastUno = Date.now();
         room.players.forEach(player => {
             if(player.uno || player.cards.length > 2) return;
@@ -425,12 +460,13 @@ class Server {
     }
     message(socket, data){
         if ((socket.lastMessage && socket.lastMessage > Date.now() - this.config.chat_cooldown) || !data.message || !data.message.replace(/\s+/g, '').length) return;
-        const player = this.players.filter(player => player.id === socket.id)[0];
-        if (!player) return;
-        const room = this.rooms.get(player.roomID);
-        if (!room) return;
+        const player = this.data(socket).player;
+        const room = this.data(socket).room;
+        if (!player || !room) return;
         socket.lastMessage = Date.now();
-        this.sendMessage(room, player.nickname, data.message, player.chatColor);
+        if(data.message.split("")[0] === '/') return this.playerCommands.exec(socket, data.message.slice(1));
+        this.sendMessage(room, player.nickname, this.config.chat_badword_filter ? badwords.clear(data.message) : data.message, player.chatColor);
+        if(this.config.log_chat) log.log("\x1b[35m" + room.roomID + "\x1b[0m", "-", player.nickname + ":", "\x1b[90m" + data.message + "\x1b[0m");
     };
     sendMessage(room, nickname, message, color = '#e8b2f5'){
         if(!this.rooms.get(room.roomID)) return;
@@ -438,6 +474,9 @@ class Server {
             player.socket.send(JSON.stringify({ type: "chat_message", nickname: nickname || "SERVER", message: message.substring(0, 64), color: color }));
         });
     };
+    sendTo(socket, message){
+        socket.send(JSON.stringify({ type: "chat_message", nickname: "SERVER", message: message.substring(0, 64), color: '#e8b2f5' }));
+    }
     roomList(socket){
         if(socket.lastRefresh && socket.lastRefresh > Date.now() - this.config.refresh_cooldown) return;
         const rooms = new Array();
@@ -453,11 +492,15 @@ class Server {
         socket.lastRefresh = Date.now();
     };
     main() {
-        console.log('Server Listening on port', this.port);
+        log.info('Server listening on port', this.config.port);
+        log.debug("Debug Mode:", "ON");
         this.server.on('connection', socket => {
+            if(this.config.max_connections && this.server.clients.size > this.config.max_connections)
+                return socket.close(1000, "Connections limit reached!");
             if (!socket.id) {
                 socket.id = this.uuid();
                 socket.send(JSON.stringify({ type: 'id', id: socket.id }));
+                socket.send(JSON.stringify({ type: 'v', version: this.version }));
             }
             socket.on('message', message => {
                 try{
@@ -552,6 +595,8 @@ class Server {
                 delete fakeroom.players[i].socket;
                 delete fakeroom.players[i].roomID;
                 delete fakeroom.players[i].chatColor;
+                delete fakeroom.players[i].permissionLevel;
+                delete fakeroom.players[i].publicID;
             } 
             player.socket.send(JSON.stringify({ type: "room", room: fakeroom }));
         })
@@ -587,4 +632,4 @@ class Server {
     };
 };
 
-new Server(2222).main();
+module.exports = Server;

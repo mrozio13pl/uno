@@ -1,0 +1,8 @@
+# "#" are considered comments
+# don't put comments after a word
+# dont put any spaces between words
+# words are checked regardless of case, if you want a word to be checked under a specific case, put "*" in front of it
+
+B@DW0RD_3XAMPLE1
+verybadWord_EX@MPLE2
+*B@DW0RD_3XAMPLE3

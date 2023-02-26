@@ -3,9 +3,9 @@ const user = {}, room = {
     players: []
 };
 
-server.onclose = () => {
+server.onclose = close => {
     $('.error-head .error-title a').text('Disconnected');
-    $('.error-head .error-desc').text('Please reload the page!');
+    $('.error-head .error-desc').text(close && close.reason || 'Please reload the page!');
     $('.error-close').hide();
     $('#error-container').show();
     location.hash = '';
@@ -28,6 +28,10 @@ server.onopen = () => {
 server.onmessage = function (event) {
     const data = JSON.parse(event.data);
     if (data.type === 'id') user.id = data.id;
+    if (data.type === 'v') {
+        console.log("Game Version: %c" + data.version, 'color: yellow');
+        $('.menu-footer').append(`<p>Version: <a target="_blank" href="https://github.com/mrozio13pl/uno/releases/latest">${data.version}</a></p>`);
+    }
     if (data.type === 'room_list') {
         $('.refresh').attr('disabled', true);
         setTimeout(() => {

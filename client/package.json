@@ -2,7 +2,7 @@
   "name": "uno-client",
   "version": "1.0.0",
   "description": "Client for UNO",
-  "main": "index.js",
+  "main": "client.js",
   "scripts": {
     "start": "node client"
   },
